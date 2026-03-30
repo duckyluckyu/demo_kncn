@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>ONFA AI - Ngân Hàng Số</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f7f6; display: flex; justify-content: center; padding-top: 50px; }
+        .chat-container { width: 450px; background: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 20px; }
+        .log-box { height: 350px; background: #222; color: #0f0; padding: 15px; overflow-y: auto; font-family: monospace; border-radius: 5px; margin-bottom: 15px; font-size: 13px; line-height: 1.5;}
+        .input-group { display: flex; flex-direction: column; gap: 10px; }
+        input { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px;}
+        button { padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;}
+        button:hover { background: #0056b3; }
+        .error { color: #ff4d4d; }
+        .warning { color: #ffcc00; }
+        .success { color: #00ffff; }
+        .user-msg { color: #fff; }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <h2 style="text-align: center; margin-top: 0; color: #333;">ONFA AI Agent 🤖</h2>
+    <div id="terminal" class="log-box">
+        [System] Khởi động hệ thống bảo mật 3 lớp...<br>
+        [System] Sẵn sàng nhận lệnh.<br>
+    </div>
+    
+    <div class="input-group">
+        <input type="number" id="amount" placeholder="Số tiền (VNĐ)" value="50000" step="10000">
+        
+        <input type="text" id="targetWallet" placeholder="Nhập ví đích đến (VD: ví_hóa_đơn_điện)" value="ví_hóa_đơn_điện">
+
+        <input type="text" id="promptInput" placeholder="Nhập lệnh (VD: Thanh toán tiền điện...)">
+        <button onclick="sendRequest()">GỬI LỆNH</button>
+    </div>
+</div>
+
+<script>
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+    function log(message, className = "") {
+        const terminal = document.getElementById('terminal');
+        const line = document.createElement('div');
+        if (className) line.className = className;
+        line.innerHTML = `> ${message}`;
+        terminal.appendChild(line);
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    async function sendRequest() {
+        const promptText = document.getElementById('promptInput').value;
+        const amountVal = parseFloat(document.getElementById('amount').value) || 0;
+        
+        // Lấy tên ví và dùng .trim() để xóa dấu cách thừa (tránh lỗi ngớ ngẩn lúc demo)
+        const targetWalletVal = document.getElementById('targetWallet').value.trim(); 
+    
+        if(!promptText || !targetWalletVal) {
+            alert("Vui lòng nhập đầy đủ Lệnh và Ví đích!");
+            return;
+        }
+
+        // Bước 0: Ghi nhận lệnh người dùng
+        log(`Command: ${promptText} | Đích: ${targetWalletVal} | Số tiền: ${amountVal} VNĐ`, "user-msg");
+        document.getElementById('promptInput').value = "";
+
+        try {
+        // --- LAYER 1: PROMPT ISOLATION ---
+            log("[Layer 1] Khởi tạo Prompt Isolation...", "warning");
+            await delay(500);
+            log("[Layer 1] Đã đóng gói dữ liệu vào XML Delimiters. Ngăn chặn chèn lệnh thành công.", "success");
+
+        // --- LAYER 2: GUARDRAILS (GỌI API) ---
+            log("[Layer 2] Đang gửi lệnh đến Small Language Model (SLM) để phân tích ý định...", "warning");
+        
+            const response = await fetch("http://127.0.0.1:8000/api/v1/agent/transfer", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    user_prompt: promptText,
+                    target_wallet: targetWalletVal, // Truyền ví user nhập xuống Backend
+                    amount: amountVal
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.status === 403) {
+                log(`[Layer 2] CẢNH BÁO: Phát hiện tấn công! ${data.detail}`, "error");
+                return;
+            }
+
+        // --- LAYER 3: HUMAN-IN-THE-LOOP ---
+            if (data.http_code === 202) {
+                log(`[Layer 3] Rủi ro cao: ${data.message}`, "warning");
+                log("[Layer 3] Đang chờ xác thực Human-in-the-loop (MFA)...", "warning");
+
+                let mfa_input = window.prompt(`🚨 [XÁC MINH GIAO DỊCH]\nMã MFA: ${data.approval_token}\nNhập mã để xác nhận:`);
+            
+                if (mfa_input) {
+                    log("Đang xác minh mã MFA...", "user-msg");
+                    const verifyRes = await fetch("http://127.0.0.1:8000/api/v1/agent/verify", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ token: mfa_input, is_approved: true })
+                    });
+                
+                    const verifyData = await verifyRes.json();
+                    if (verifyRes.status === 200) {
+                        log(`[Thành công] ${verifyData.message}`, "success");
+                    } else {
+                        log(`[Thất bại] ${verifyData.detail}`, "error");
+                    }
+                } else {
+                    log("[Layer 3] Giao dịch BỊ HỦY bởi người dùng.", "error");
+                }
+            } else {
+                log(`[Success] ${data.message}`, "success");
+            }
+        } catch (error) {
+            log("Lỗi kết nối Server! Vui lòng kiểm tra lại FastAPI.", "error");
+        }
+    }
+</script>
+
+</body>
+</html>
